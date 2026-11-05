@@ -1,46 +1,35 @@
-export async function POST(req) {
-  try {
-    const { amount, email, name } = await req.json();
-    
-    const apiKey = process.env.MONNIFY_API_KEY;
-    const secretKey = process.env.MONNIFY_SECRET_KEY;
-    const contractCode = process.env.MONNIFY_CONTRACT_CODE;
-    const baseUrl = process.env.MONNIFY_BASE_URL || "https://api.monnify.com";
+import { createMonnifyCheckout, MonnifyApiError } from '../../../../lib/monnify';
 
-    const credentials = Buffer.from(`${apiKey}:${secretKey}`).toString("base64");
-    
-    // Get access token
-    const authRes = await fetch(`${baseUrl}/api/v1/auth/login`, {
-      method: "POST",
-      headers: { Authorization: `Basic ${credentials}` }
+export const runtime = 'nodejs';
+
+export async function POST(request) {
+  let input;
+  try {
+    input = await request.json();
+  } catch {
+    return Response.json({ error: 'Send a valid JSON checkout request.' }, { status: 400 });
+  }
+
+  try {
+    const checkout = await createMonnifyCheckout({
+      planId: input?.planId,
+      name: input?.name,
+      email: input?.email,
+      origin: new URL(request.url).origin,
     });
-    const authData = await authRes.json();
-    const token = authData.responseBody?.accessToken;
-    
-    // Create payment link
-    const paymentRes = await fetch(`${baseUrl}/api/v1/merchant/transactions/init-transaction`, {
-      method: "POST",
-      headers: { 
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        amount: amount || 1000,
-        currencyCode: "NGN",
-        paymentReference: `REF_${Date.now()}`,
-        customerName: name || "Customer",
-        customerEmail: email || "customer@email.com",
-        contractCode: contractCode,
-        paymentDescription: "AI Video Payment",
-        redirectUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://ai-video-app.vercel.app"}/payment-success`,
-        paymentMethods: ["CARD", "ACCOUNT_TRANSFER"]
-      })
-    });
-    
-    const paymentData = await paymentRes.json();
-    return new Response(JSON.stringify(paymentData), { status: 200 });
-    
-  } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500 });
+
+    return Response.json(checkout);
+  } catch (error) {
+    if (error instanceof MonnifyApiError) {
+      return Response.json(
+        { error: error.message, code: error.code },
+        { status: error.status },
+      );
+    }
+
+    return Response.json(
+      { error: 'We could not start checkout. Please try again.' },
+      { status: 502 },
+    );
   }
 }
